@@ -1,7 +1,6 @@
 import os
 import streamlit as st
 import openai
-from dotenv import load_dotenv
 from PyPDF2 import PdfReader
 from langchain.text_splitter import CharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
@@ -9,29 +8,65 @@ from langchain_community.vectorstores import FAISS
 from langchain_openai import ChatOpenAI
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationalRetrievalChain
-from htmlTemplates import css, bot_template, user_template
-import logging
 from langdetect import detect
+
+# Custom CSS for chat messages
+css = '''
+<style>
+.chat-message {
+    padding: 1rem;
+    border-radius: 0.5rem;
+    margin-bottom: 1rem;
+    display: flex;
+    justify-content: flex-start;
+    align-items: flex-start;
+}
+.chat-message.user {
+    background-color: #2b313e;
+}
+.chat-message.bot {
+    background-color: #475063;
+}
+.chat-message .avatar {
+    width: 20%;
+    padding-right: 1rem;
+}
+.chat-message .avatar img {
+    max-width: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+}
+.chat-message .message {
+    width: 80%;
+    padding: 0.5rem;
+    color: white;
+    word-wrap: break-word;
+}
+</style>
+'''
+
+# HTML templates for chat messages
+bot_template = '''
+<div class="chat-message bot">
+    <div class="avatar">
+        <img src="https://i.ibb.co/sPvCDGT/Robot.jpg" alt="Robot">
+    </div>
+    <div class="message">{{MSG}}</div>
+</div>
+'''
+
+user_template = '''
+<div class="chat-message user">
+    <div class="avatar">
+        <img src="https://i.ibb.co/pPPVnfL/Human.jpg" alt="Human">
+    </div>
+    <div class="message">{{MSG}}</div>
+</div>
+'''
 
 # Load the API key from Streamlit secrets
 openai.api_key = st.secrets['OPENAI_API_KEY']
 os.environ['OPENAI_API_KEY'] = st.secrets['OPENAI_API_KEY']
-
-# Set up logging
-logging.basicConfig(filename='unanswered_questions.log', level=logging.INFO,
-                    format='%(asctime)s - %(message)s')  # Customize format if needed
-
-logger = logging.getLogger()
-
-# Custom filter to identify unanswered questions
-class UnansweredQuestionFilter(logging.Filter):
-    def filter(self, record):
-        return "Unanswered question" in record.getMessage()
-
-logger.addFilter(UnansweredQuestionFilter())
-
-def log_unanswered_question(question):
-    logger.info(f"Unanswered question: {question}")
 
 def get_pdf_text_from_folder(folder_path):
     text = ""
@@ -70,36 +105,19 @@ def get_conversation_chain(vectorstore):
     return conversation_chain
 
 def handle_userinput(user_question):
-    # Detect the language of the user's question
     lang = detect(user_question)
 
     if lang == 'de':
         response = st.session_state.conversation({'question': user_question})
-        st.session_state.chat_history = response['chat_history']
-
-        answered = False
-        for i, message in enumerate(st.session_state.chat_history):
-            if i % 2 == 0:
-                st.write(user_template.replace(
-                    "{{MSG}}", message.content), unsafe_allow_html=True)
-            else:
-                st.write(bot_template.replace(
-                    "{{MSG}}", message.content), unsafe_allow_html=True)
-                if any(response in message.content for response in ["Es tut mir leid", "Ich weiß es nicht", "Entschuldigung"]):
-                    answered = False
-                else:
-                    answered = True
-        
-        if not answered:
-            log_unanswered_question(user_question)
+        answer = response['chat_history'][-1].content
+        st.session_state.chat_history.append((user_question, answer))
     else:
-        st.write(bot_template.replace(
-            "{{MSG}}", "Bitte stellen Sie Ihre Frage auf Deutsch."), unsafe_allow_html=True)
+        st.write(bot_template.replace("{{MSG}}", "Bitte stellen Sie Ihre Frage auf Deutsch."), unsafe_allow_html=True)
 
 def admin_page():
-    st.title("Verwaltungsseite")
-    username = st.text_input("Benutzername")
-    password = st.text_input("Passwort", type="password")
+    st.title("Admin Page")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
     login_button = st.button("Login")
 
     if login_button:
@@ -107,10 +125,10 @@ def admin_page():
             st.success("Logged in successfully!")
             st.session_state["admin_logged_in"] = True
         else:
-            st.error("Ungültiger Benutzername oder Passwort")
+            st.error("Invalid username or password")
 
     if st.session_state.get("admin_logged_in"):
-        st.subheader("Logbuch der unbeantworteten Fragen")
+        st.subheader("Unanswered Questions Log")
         log_content = ""
         with open('unanswered_questions.log', 'r') as log_file:
             log_content = log_file.read()
@@ -120,7 +138,7 @@ def admin_page():
         st.download_button("Download Log", log_content, file_name='unanswered_questions.log')
 
 def main():
-    st.set_page_config(page_title="Chatten mit AI Chatbot", page_icon=":robot:")
+    st.set_page_config(page_title="AI Chatbot", page_icon=":robot:")
     st.write(css, unsafe_allow_html=True)
 
     if "conversation" not in st.session_state:
@@ -130,41 +148,27 @@ def main():
     if "admin_logged_in" not in st.session_state:
         st.session_state.admin_logged_in = False
 
-    st.sidebar.subheader("Ihre Dokumente")
-    st.sidebar.button("Verwaltungsseite", on_click=lambda: st.session_state.update(show_admin_page=True))
+    st.title("AI Chatbot")
 
-    # Check for admin page display
-    if st.session_state.get("show_admin_page"):
-        admin_page()
-        return
-
-    st.title("FULDA BIOGASANLAGE CHATBOT")
-
-    # Load PDFs from the data folder
-    with st.spinner("Processing"):
+    with st.spinner("Processing PDFs..."):
         raw_text = get_pdf_text_from_folder('data')
-
-        # Get the text chunks
         text_chunks = get_text_chunks(raw_text)
-
-        # Create vector store
         vectorstore = get_vectorstore(text_chunks)
-
-        # Create conversation chain
         st.session_state.conversation = get_conversation_chain(vectorstore)
 
-    with st.spinner("Laden..."):
-        user_question = st.text_input("Stellen Sie eine Frage zu Ihren Dokumenten:")
-        if st.button("Laufen lassen"):
-            if user_question:
-                st.session_state.chat_history.append(user_question)
-                handle_userinput(user_question)
+    user_question = st.chat_input("Ask a question:")
+    if user_question:
+        handle_userinput(user_question)
 
-    # Display previously asked questions
     if st.session_state.chat_history:
-        st.sidebar.subheader("Zuvor gestellte Fragen")
-        for question in st.session_state.chat_history:
-            st.sidebar.write(question)
+        st.subheader("Previous Chats:")
+        for question, answer in st.session_state.chat_history:
+            st.write(user_template.replace("{{MSG}}", question), unsafe_allow_html=True)
+            st.write(bot_template.replace("{{MSG}}", answer), unsafe_allow_html=True)
+
+    st.sidebar.subheader("Your Documents")
+    if st.sidebar.button("Admin Page"):
+        admin_page()
 
 if __name__ == '__main__':
     main()
