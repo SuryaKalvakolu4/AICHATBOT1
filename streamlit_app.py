@@ -138,7 +138,7 @@ def admin_page():
         st.download_button("Download Log", log_content, file_name='unanswered_questions.log')
 
 def main():
-    st.set_page_config(page_title="AI Chatbot", page_icon=":robot:")
+    st.set_page_config(page_title="FULDA BIOGASANLAGE RAG CHATBOT", page_icon=":robot:")
     st.write(css, unsafe_allow_html=True)
 
     if "conversation" not in st.session_state:
@@ -148,27 +148,22 @@ def main():
     if "admin_logged_in" not in st.session_state:
         st.session_state.admin_logged_in = False
 
-    st.title("AI Chatbot")
+    st.title("BIOGASANLAGE RAG CHATBOT")
 
-    with st.spinner("Processing PDFs..."):
+    with st.spinner("Verarbeitung von PDFs..."):
         raw_text = get_pdf_text_from_folder('data')
         text_chunks = get_text_chunks(raw_text)
         vectorstore = get_vectorstore(text_chunks)
         st.session_state.conversation = get_conversation_chain(vectorstore)
 
-    user_question = st.chat_input("Ask a question:")
+    user_question = st.chat_input("Stellen Sie eine Frage:")
     if user_question:
         handle_userinput(user_question)
 
     if st.session_state.chat_history:
-        st.subheader("Previous Chats:")
         for question, answer in st.session_state.chat_history:
             st.write(user_template.replace("{{MSG}}", question), unsafe_allow_html=True)
             st.write(bot_template.replace("{{MSG}}", answer), unsafe_allow_html=True)
-
-    st.sidebar.subheader("Your Documents")
-    if st.sidebar.button("Admin Page"):
-        admin_page()
 
 if __name__ == '__main__':
     main()
