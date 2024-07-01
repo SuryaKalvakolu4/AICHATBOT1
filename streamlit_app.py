@@ -9,6 +9,10 @@ from langchain_openai import ChatOpenAI
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationalRetrievalChain
 from langdetect import detect
+import logging
+
+# Setup logging for unanswered questions
+logging.basicConfig(filename='unanswered_questions.log', level=logging.INFO, format='%(asctime)s - %(message)s')
 
 # Custom CSS for chat messages
 css = '''
@@ -73,7 +77,7 @@ def get_pdf_text_from_folder(folder_path):
     for filename in os.listdir(folder_path):
         if filename.endswith(".pdf"):
             pdf_path = os.path.join(folder_path, filename)
-            pdf_reader = PdfReader(os.path.join(folder_path, filename))
+            pdf_reader = PdfReader(pdf_path)
             for page in pdf_reader.pages:
                 text += page.extract_text()
     return text
@@ -110,6 +114,10 @@ def handle_userinput(user_question):
     if lang == 'de':
         response = st.session_state.conversation({'question': user_question})
         answer = response['chat_history'][-1].content
+        
+        if "Ich weiß es nicht" in answer or "Es tut mir leid" in answer or "ich kann die Frage nicht beantworten" in answer:
+            logging.info(f"Unanswered question: {user_question}")
+        
         st.session_state.chat_history.append((user_question, answer))
     else:
         st.write(bot_template.replace("{{MSG}}", "Bitte stellen Sie Ihre Frage auf Deutsch."), unsafe_allow_html=True)
@@ -134,20 +142,11 @@ def admin_page():
             log_content = log_file.read()
         
         st.text_area("Log Content", log_content, height=300)
-
         st.download_button("Download Log", log_content, file_name='unanswered_questions.log')
+        if st.sidebar.button("Back to Main Page"):
+            st.session_state.page = "main"
 
-def main():
-    st.set_page_config(page_title="FULDA BIOGASANLAGE RAG CHATBOT", page_icon=":robot:")
-    st.write(css, unsafe_allow_html=True)
-
-    if "conversation" not in st.session_state:
-        st.session_state.conversation = None
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-    if "admin_logged_in" not in st.session_state:
-        st.session_state.admin_logged_in = False
-
+def main_page():
     st.title("BIOGASANLAGE RAG CHATBOT")
 
     with st.spinner("Verarbeitung von PDFs..."):
@@ -165,5 +164,25 @@ def main():
             st.write(user_template.replace("{{MSG}}", question), unsafe_allow_html=True)
             st.write(bot_template.replace("{{MSG}}", answer), unsafe_allow_html=True)
 
+    if st.sidebar.button("Admin Page"):
+        st.session_state.page = "admin"
+
+def main():
+    st.set_page_config(page_title="FULDA BIOGASANLAGE RAG CHATBOT", page_icon=":robot:")
+    st.write(css, unsafe_allow_html=True)
+
+    if "conversation" not in st.session_state:
+        st.session_state.conversation = None
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+    if "page" not in st.session_state:
+        st.session_state.page = "main"
+
+    if st.session_state.page == "main":
+        main_page()
+    elif st.session_state.page == "admin":
+        admin_page()
+
 if __name__ == '__main__':
     main()
+
