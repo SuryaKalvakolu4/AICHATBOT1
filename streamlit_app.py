@@ -10,6 +10,9 @@ from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationalRetrievalChain
 from langdetect import detect
 import logging
+from datetime import datetime
+import re
+from sentence_transformers import SentenceTransformer, util
 
 # Setup logging for unanswered questions
 logging.basicConfig(filename='unanswered_questions.log', level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -32,7 +35,7 @@ css = '''
     background-color: #475063;
 }
 .chat-message .avatar {
-    width: 20%;
+    width: 10%;
     padding-right: 1rem;
 }
 .chat-message .avatar img {
@@ -72,6 +75,9 @@ user_template = '''
 openai.api_key = st.secrets['OPENAI_API_KEY']
 os.environ['OPENAI_API_KEY'] = st.secrets['OPENAI_API_KEY']
 
+# Load the SentenceTransformer model for semantic similarity
+sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
+
 def get_pdf_text_from_folder(folder_path):
     text = ""
     for filename in os.listdir(folder_path):
@@ -108,15 +114,48 @@ def get_conversation_chain(vectorstore):
     )
     return conversation_chain
 
+def is_related_to_previous_questions(current_question, chat_history, threshold=0.7):
+    if not chat_history:
+        return False
+    
+    previous_questions = [q for q, _ in chat_history]
+    previous_questions_embeddings = sentence_model.encode(previous_questions, convert_to_tensor=True)
+    current_question_embedding = sentence_model.encode(current_question, convert_to_tensor=True)
+    
+    # Compute the similarity score
+    similarity_scores = util.pytorch_cos_sim(current_question_embedding, previous_questions_embeddings)
+    
+    # Check if the highest similarity score exceeds the threshold
+    if similarity_scores.max().item() > threshold:
+        return True
+    return False
+
 def handle_userinput(user_question):
     lang = detect(user_question)
 
     if lang == 'de':
-        response = st.session_state.conversation({'question': user_question})
+        if is_related_to_previous_questions(user_question, st.session_state.chat_history):
+            # Combine the conversation history with the current question for better context
+            combined_query = " ".join([msg for msg, _ in st.session_state.chat_history[-3:]]) + " " + user_question
+            response = st.session_state.conversation({'question': combined_query})
+        else:
+            response = st.session_state.conversation({'question': user_question})
+
         answer = response['chat_history'][-1].content
         
-        if "Ich weiß es nicht" in answer or "Es tut mir leid" in answer or "ich kann die Frage nicht beantworten" in answer:
-            logging.info(f"Unanswered question: {user_question}")
+        # Check if the current question is a follow-up
+        if "Unterschied" in user_question:
+            previous_answers = [answer for _, answer in st.session_state.chat_history[-3:]]
+            combined_query = " ".join(previous_answers) + " " + user_question
+            response = st.session_state.conversation({'question': combined_query})
+            answer = response['chat_history'][-1].content
+        
+        # List of phrases to detect in responses
+        phrases_to_detect = ["Ich weiß es nicht", "Es tut mir leid", "ich kann die Frage nicht beantworten", "Ich weiß nicht"]
+        
+        # Check for phrases within the response using regex
+        if any(re.search(r'\b' + re.escape(phrase) + r'\b', answer) for phrase in phrases_to_detect):
+            logging.info(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Unanswered question: {user_question}")
         
         st.session_state.chat_history.append((user_question, answer))
     else:
@@ -185,4 +224,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
