@@ -1,7 +1,7 @@
 langchain
 PyPDF2
 python-dotenv
-streamlit
+streamlit==1.4.0
 openai
 faiss-cpu
 altair
