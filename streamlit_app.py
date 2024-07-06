@@ -76,7 +76,7 @@ openai.api_key = st.secrets['OPENAI_API_KEY']
 os.environ['OPENAI_API_KEY'] = st.secrets['OPENAI_API_KEY']
 
 # Load the SentenceTransformer model for semantic similarity
-sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
+sentence_model = SentenceTransformer('paraphrase-distilroberta-base-v1')
 
 def get_pdf_text_from_folder(folder_path):
     text = ""
